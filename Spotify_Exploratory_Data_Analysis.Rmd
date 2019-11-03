@@ -1,0 +1,169 @@
+---
+title: "Spotify Exploratory Data Analysis"
+author: "Seth Goldman"
+date: "November 3, 2019"
+output: html_document
+---
+
+## Overview  
+Requested my personal data from Spotify, which took a couple of days. The data was made available via a zip folder of JSON files. [Documentation from Spotify](https://support.spotify.com/us/account_payment_help/privacy/understanding-my-data/)
+
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(jsonlite)
+library(skimr)
+library(ggplot2)
+library(lubridate)
+
+streaming_history <- fromJSON("./data/StreamingHistory0.json") 
+streaming_history_overflow <- fromJSON("./data/StreamingHistory1.json")
+
+streaming <- bind_rows(streaming_history,
+                       streaming_history_overflow) %>% 
+  mutate(endTime = with_tz(as.POSIXct(endTime,tz = "UTC"),tzone = "EST"))
+
+rm(list = c("streaming_history", "streaming_history_overflow"))
+
+# Store timespan to use in chart sub titles
+sub_title_text <- paste0("Between ", as.Date(min(streaming$endTime))," and ",as.Date(max(streaming$endTime)))
+```
+
+
+### Summary Statistics
+```{r explore_streaming_data}
+# Summary Statistics
+skim(streaming)
+
+
+```
+
+### Most Played Artists
+
+```{r streaming_artists}
+
+artist_summary <- streaming %>% 
+  group_by(artistName) %>% 
+  summarise("Streams" = n(),
+            "Minutes Streamed" = round(sum(msPlayed)/60000,2),
+            "Hours Streamed" = round(`Minutes Streamed`/60,2),
+            "Days with a Stream" = n_distinct(as.Date(endTime))) 
+
+
+artist_summary %>% 
+  top_n(n = 20, wt = `Hours Streamed`) %>%  
+  ggplot(aes(x=reorder(artistName,`Hours Streamed`), y = `Hours Streamed`))+
+  geom_bar(stat = "identity", fill = "#1DB954")+
+  coord_flip() +
+  xlab("")+
+  ggtitle("Top Artists by Hours Streamed",
+          subtitle = sub_title_text)
+  
+
+
+artist_summary %>% 
+  top_n(n = 20, wt = Streams) %>%  
+  ggplot(aes(x=reorder(artistName,Streams), y = Streams))+
+  geom_bar(stat = "identity", fill = "#1DB954")+
+  coord_flip() +
+  xlab("")+
+  ggtitle("Top Artists by # of Streams",
+          subtitle = sub_title_text)
+  
+artist_summary %>% 
+  top_n(n = 20, wt = `Days with a Stream`) %>%  
+  ggplot(aes(x=reorder(artistName,`Days with a Stream`), y = `Days with a Stream`))+
+  geom_bar(stat = "identity", fill = "#1DB954")+
+  coord_flip() +
+  xlab("")+
+  ggtitle("Top Artists by # of Days with at least 1 Stream",
+          subtitle = sub_title_text)
+
+
+
+```
+
+
+```{r time_of_day}
+
+streaming %>% 
+  group_by("stream_date" = as.Date(endTime)) %>% 
+  summarise("stream_count" = n(),
+            "minutes_streamed" = sum(msPlayed)/60000,
+            "hours_streamed" = minutes_streamed / 60) %>% 
+  ggplot(aes(x=stream_date, y = hours_streamed))+
+  geom_point()+
+  geom_smooth()+
+  ggtitle("Hours Streamed per Day",
+          subtitle = sub_title_text)
+
+
+streaming %>% 
+  group_by("stream_month" = factor(month(as.Date(endTime),label = TRUE))) %>% 
+  summarise("stream_count" = n(),
+            "minutes_streamed" = sum(msPlayed)/60000,
+            "hours_streamed" = minutes_streamed / 60) %>% 
+  ggplot(aes(x=stream_month, y = hours_streamed))+
+  geom_point()+
+  geom_smooth()+
+  ggtitle("Hours Streamed per Month",
+          subtitle = sub_title_text)+
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+
+
+
+time_of_day_summary <- 
+  streaming %>% 
+  mutate("day_of_week" = wday(as.Date(endTime),label = TRUE),
+         "hour_of_day" = hour(endTime)) %>% 
+  group_by(day_of_week, hour_of_day) %>% 
+  summarise("stream_count" = n(),
+            "minutes_streamed" = sum(msPlayed)/60000,
+            "hours_streamed" = minutes_streamed/60,
+            "avg_minutes_streamed" = mean(msPlayed)/60000,
+            "median_minutes_streamed" = median(msPlayed)/60000) 
+  
+
+
+time_of_day_summary %>% 
+  ggplot(aes(x=factor(hour_of_day),y=day_of_week, fill = hours_streamed))+
+  geom_tile()+
+  scale_fill_gradient(low="white", high = "#1DB954")+
+  xlab("Hour of Day (EST)")+
+  ylab("")+
+  ggtitle("Total Hours Streamed", subtitle = sub_title_text)+
+  guides(fill=guide_legend(title="Hours Streamed")) +
+  theme_bw()+
+  theme_minimal()
+
+time_of_day_summary %>% 
+  ggplot(aes(x=factor(hour_of_day),y=day_of_week, fill = median_minutes_streamed))+
+  geom_tile()+
+  scale_fill_gradient(low="white", high = "#1DB954")+
+  xlab("Hour of Day (EST)")+
+  ylab("")+
+  ggtitle("Median Minutes Streamed", subtitle = sub_title_text)+
+  guides(fill=guide_legend(title="Minutes Streamed")) +
+  theme_bw()+
+  theme_minimal()
+
+
+
+
+
+
+time_of_day_summary %>% 
+  group_by("is_weekend" = ifelse(day_of_week %in% c("Sat","Sun"), TRUE, FALSE)) %>% 
+  summarise("stream_count" = sum(stream_count),
+            "hours_streamed" = sum(hours_streamed))
+
+
+
+streaming %>% 
+  group_by(as.Date(endTime)) %>% 
+  summarise( "hours_streamed" = sum(msPlayed)/60000/60) %>% 
+  top_n(n = 20,wt = hours_streamed) %>% 
+  arrange(desc(hours_streamed))
+
+```
+
